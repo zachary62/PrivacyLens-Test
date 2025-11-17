@@ -38,8 +38,8 @@ The effort required to obtain data points increases from seed to vignette to tra
     ```
 2. Install the required packages.
    ```shell
-   conda create -n privacylens python=3.11
-   conda activate privacylens
+   python3 -m venv privacylens
+   source privacylens/bin/activate  # On Windows use: privacylens\Scripts\activate
    pip install -r requirements.txt
    ```
 3. Set up API keys. Create a `.env` file in the root directory and add the following (if you do not need to use GPT or Claude, you can skip this step):

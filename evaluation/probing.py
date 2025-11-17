@@ -9,14 +9,14 @@ from argparse import ArgumentParser
 import numpy as np
 import openai
 import pandas as pd
-import torch
+# import torch  # Removed - local model dependencies not needed
 from dotenv import load_dotenv
 from procoder.functional import (
     add_refnames,
     format_multiple_prompts,
 )
 from tqdm import tqdm
-from transformers import AutoTokenizer, AutoModelForCausalLM
+# from transformers import AutoTokenizer, AutoModelForCausalLM  # Removed - local model dependencies not needed
 
 sys.path.append('../data_construction')
 from toolemu.prompts.agent import *
@@ -151,21 +151,22 @@ def prepare_trajectory_probing_prompt(
     return final_prompt
 
 
-def get_hf_model_completion(hf_model, hf_tokenizer, prompt, max_new_tokens=10):
-    inputs = hf_tokenizer(prompt, return_tensors="pt").to("cuda")
-
-    with torch.no_grad():
-        generated_ids = hf_model.generate(
-            inputs.input_ids,
-            max_new_tokens=max_new_tokens,
-            temperature=0.0,
-            do_sample=False
-        )
-
-        new_text_ids = generated_ids[:, inputs.input_ids.size(-1):]
-        new_text = hf_tokenizer.decode(new_text_ids[0], skip_special_tokens=True)
-
-    return new_text
+# Local model support removed - use API-based models (GPT or Claude) instead
+# def get_hf_model_completion(hf_model, hf_tokenizer, prompt, max_new_tokens=10):
+#     inputs = hf_tokenizer(prompt, return_tensors="pt").to("cuda")
+#
+#     with torch.no_grad():
+#         generated_ids = hf_model.generate(
+#             inputs.input_ids,
+#             max_new_tokens=max_new_tokens,
+#             temperature=0.0,
+#             do_sample=False
+#         )
+#
+#         new_text_ids = generated_ids[:, inputs.input_ids.size(-1):]
+#         new_text = hf_tokenizer.decode(new_text_ids[0], skip_special_tokens=True)
+#
+#     return new_text
 
 
 def find_isolated_capital_b(text):
@@ -178,7 +179,7 @@ def find_isolated_capital_b(text):
 @print_api_usage
 def main():
     seed = 0
-    torch.manual_seed(seed)
+    # torch.manual_seed(seed)  # Removed - local model dependencies not needed
     np.random.seed(seed)
     random.seed(seed)
 
@@ -203,9 +204,10 @@ def main():
         openai.api_type = os.environ['OPENAI_API_TYPE']
         openai.api_version = os.environ['OPENAI_API_VERSION']
 
-    if 'mistral' in args.model or 'llama' in args.model or 'zephyr' in args.model:
-        model = AutoModelForCausalLM.from_pretrained(args.model, cache_dir=args.hf_cache_dir, device_map="auto")
-        tokenizer = AutoTokenizer.from_pretrained(args.model, cache_dir=args.hf_cache_dir)
+    # Local model support removed - use API-based models (GPT or Claude) instead
+    # if 'mistral' in args.model or 'llama' in args.model or 'zephyr' in args.model:
+    #     model = AutoModelForCausalLM.from_pretrained(args.model, cache_dir=args.hf_cache_dir, device_map="auto")
+    #     tokenizer = AutoTokenizer.from_pretrained(args.model, cache_dir=args.hf_cache_dir)
 
     with open(args.input_path, 'r') as f:
         data = json.load(f)
@@ -319,23 +321,24 @@ def main():
                 trajectory_privacy_enhanced_prompt_answer = trajectory_privacy_enhanced_prompt_response.content[
                     0].text.strip()
                 result['trajectory_privacy_enhanced_prompt_answer'].append(trajectory_privacy_enhanced_prompt_answer)
-        elif 'mistral' in args.model or 'llama' in args.model or 'zephyr' in args.model:
-            inputs = {}
-            if 'seed' in args.level:
-                inputs['seed'] = seed_probing_prompt
-            if 'vignette' in args.level:
-                inputs['vignette'] = vignette_probing_prompt
-            if 'trajectory' in args.level:
-                inputs['trajectory_naive_prompt'] = trajectory_probing_naive_prompt
-            if 'trajectory_enhancing' in args.level:
-                inputs['trajectory_privacy_enhanced_prompt'] = trajectory_probing_privacy_enhanced_prompt
-
-            # Apply chat template.
-            for k in inputs:
-                inputs[k] = tokenizer.apply_chat_template([{'role': 'user', 'content': inputs[k]}], tokenize=False)
-            for k in inputs:
-                completion = get_hf_model_completion(model, tokenizer, inputs[k])
-                result[f'{k}_answer'].append(completion)
+        # Local model support removed - use API-based models (GPT or Claude) instead
+        # elif 'mistral' in args.model or 'llama' in args.model or 'zephyr' in args.model:
+        #     inputs = {}
+        #     if 'seed' in args.level:
+        #         inputs['seed'] = seed_probing_prompt
+        #     if 'vignette' in args.level:
+        #         inputs['vignette'] = vignette_probing_prompt
+        #     if 'trajectory' in args.level:
+        #         inputs['trajectory_naive_prompt'] = trajectory_probing_naive_prompt
+        #     if 'trajectory_enhancing' in args.level:
+        #         inputs['trajectory_privacy_enhanced_prompt'] = trajectory_probing_privacy_enhanced_prompt
+        #
+        #     # Apply chat template.
+        #     for k in inputs:
+        #         inputs[k] = tokenizer.apply_chat_template([{'role': 'user', 'content': inputs[k]}], tokenize=False)
+        #     for k in inputs:
+        #         completion = get_hf_model_completion(model, tokenizer, inputs[k])
+        #         result[f'{k}_answer'].append(completion)
         else:
             raise NotImplementedError
 

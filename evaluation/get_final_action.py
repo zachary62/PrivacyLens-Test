@@ -7,21 +7,22 @@ import sys
 import numpy as np
 import openai
 import pandas as pd
-import torch
+# import torch  # Removed - local model dependencies not needed
 from dotenv import load_dotenv
 from procoder.functional import (
     add_refnames,
     format_multiple_prompts,
 )
 from tqdm import tqdm
-from transformers import AutoTokenizer
+# from transformers import AutoTokenizer  # Removed - local model dependencies not needed
 
 sys.path.append('../data_construction')
 from toolemu.prompts.agent import *
 from toolemu.tools import get_toolkits_by_names
 
 sys.path.append('../helper')
-from utils import openai_chat_completion_with_retry, print_api_usage, VLLM, claude_chat_completion_with_retry
+from utils import openai_chat_completion_with_retry, print_api_usage, claude_chat_completion_with_retry
+# from utils import VLLM  # Removed - local model dependencies not needed
 
 
 def prepare_args():
@@ -122,7 +123,7 @@ def post_process(s):
 @print_api_usage
 def main():
     seed = 0
-    torch.manual_seed(seed)
+    # torch.manual_seed(seed)  # Removed - local model dependencies not needed
     np.random.seed(seed)
     random.seed(seed)
 
@@ -136,17 +137,18 @@ def main():
             openai.api_base = os.environ['OPENAI_API_BASE']
             openai.api_version = os.environ['OPENAI_API_VERSION']
 
-    if 'mistral' in args.model or 'llama' in args.model or 'zephyr' in args.model or 'vicuna' in args.model:
-        vllm_engine = VLLM(
-            model=args.model,
-            tensor_parallel_size=args.gpu_num,
-            trust_remote_code=True,
-            max_num_batched_tokens=16000,
-            max_new_tokens=1000,
-            temperature=0,
-            download_dir=args.hf_cache_dir
-        )
-        tokenizer = AutoTokenizer.from_pretrained(args.model, cache_dir=args.hf_cache_dir)
+    # Local model support removed - use API-based models (GPT or Claude) instead
+    # if 'mistral' in args.model or 'llama' in args.model or 'zephyr' in args.model or 'vicuna' in args.model:
+    #     vllm_engine = VLLM(
+    #         model=args.model,
+    #         tensor_parallel_size=args.gpu_num,
+    #         trust_remote_code=True,
+    #         max_num_batched_tokens=16000,
+    #         max_new_tokens=1000,
+    #         temperature=0,
+    #         download_dir=args.hf_cache_dir
+    #     )
+    #     tokenizer = AutoTokenizer.from_pretrained(args.model, cache_dir=args.hf_cache_dir)
 
     with open(args.input_path, 'r') as f:
         data = json.load(f)
@@ -192,19 +194,20 @@ def main():
                 engine=args.model, messages=[{'role': 'user', 'content': agent_prompt}],
                 max_tokens=400, temperature=0.0)
             final_action = final_action.content[0].text.strip()
-        elif 'mistral' in args.model or 'llama' in args.model or 'zephyr' in args.model or 'vicuna' in args.model:
-            inputs = [agent_prompt]
-            inputs_in_chat_template = []
-            if 'vicuna' in args.model:
-                for input_text in inputs:
-                    inputs_in_chat_template.append(f'User: {input_text}\n Assistant:')
-            else:
-                for input_text in inputs:
-                    inputs_in_chat_template.append(
-                        tokenizer.apply_chat_template([{'role': 'user', 'content': input_text}], tokenize=False)
-                    )
-            output = vllm_engine.generate(inputs_in_chat_template).generations
-            final_action = output[0][0].text.strip()
+        # Local model support removed - use API-based models (GPT or Claude) instead
+        # elif 'mistral' in args.model or 'llama' in args.model or 'zephyr' in args.model or 'vicuna' in args.model:
+        #     inputs = [agent_prompt]
+        #     inputs_in_chat_template = []
+        #     if 'vicuna' in args.model:
+        #         for input_text in inputs:
+        #             inputs_in_chat_template.append(f'User: {input_text}\n Assistant:')
+        #     else:
+        #         for input_text in inputs:
+        #             inputs_in_chat_template.append(
+        #                 tokenizer.apply_chat_template([{'role': 'user', 'content': input_text}], tokenize=False)
+        #             )
+        #     output = vllm_engine.generate(inputs_in_chat_template).generations
+        #     final_action = output[0][0].text.strip()
         else:
             raise NotImplementedError
 

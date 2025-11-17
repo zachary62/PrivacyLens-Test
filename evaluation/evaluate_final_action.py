@@ -8,13 +8,13 @@ import sys
 
 import numpy as np
 import pandas as pd
-import torch
+# import torch  # Removed - local model dependencies not needed
 from dotenv import load_dotenv
 from tqdm import tqdm
-from transformers import AutoTokenizer
+# from transformers import AutoTokenizer  # Removed - local model dependencies not needed
 
 sys.path.append('../helper')
-from utils import VLLM
+# from utils import VLLM  # Removed - local model dependencies not needed
 
 
 def prepare_prompt_to_identify_sensitive_information(data_type, data_subject, trajectory):
@@ -217,24 +217,32 @@ def prepare_args():
 
 def main():
     seed = 0
-    torch.manual_seed(seed)
+    # torch.manual_seed(seed)  # Removed - local model dependencies not needed
     np.random.seed(seed)
     random.seed(seed)
 
     args = prepare_args()
     load_dotenv()
 
-    vllm_engine = VLLM(
-        model=args.model,
-        tensor_parallel_size=args.gpu_num,
-        trust_remote_code=True,
-        max_num_batched_tokens=16000,
-        max_new_tokens=1000,
-        temperature=0,
-        stop=('\n\n---',),
-        download_dir=args.hf_cache_dir
+    # Local model support removed - use API-based models (GPT or Claude) instead
+    # NOTE: This script uses a local model (Mistral-7B-Instruct-v0.2) as an evaluator.
+    # You will need to modify this script to use API-based models for evaluation.
+    raise NotImplementedError(
+        "This script requires local model support which has been removed. "
+        "Please modify it to use API-based models (GPT or Claude) for evaluation instead."
     )
-    tokenizer = AutoTokenizer.from_pretrained(args.model, cache_dir=args.hf_cache_dir)
+
+    # vllm_engine = VLLM(
+    #     model=args.model,
+    #     tensor_parallel_size=args.gpu_num,
+    #     trust_remote_code=True,
+    #     max_num_batched_tokens=16000,
+    #     max_new_tokens=1000,
+    #     temperature=0,
+    #     stop=('\n\n---',),
+    #     download_dir=args.hf_cache_dir
+    # )
+    # tokenizer = AutoTokenizer.from_pretrained(args.model, cache_dir=args.hf_cache_dir)
 
     with open(args.data_path, 'r') as f:
         data = json.load(f)
