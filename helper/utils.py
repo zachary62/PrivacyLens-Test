@@ -9,6 +9,7 @@ from typing import List, Callable, Tuple, Optional, Dict, Any
 import anthropic
 import openai
 from anthropic import Anthropic
+from google import genai
 from joblib import Memory
 from langchain.callbacks.manager import CallbackManagerForLLMRun
 from langchain.llms import BaseLLM
@@ -131,6 +132,40 @@ def claude_chat_completion_with_retry(engine, messages, **kwargs):
         prompt_tokens=response.usage.input_tokens,
         completion_tokens=response.usage.output_tokens
     )
+    return response
+
+
+@CacheMemory.cache
+@retry(max_retries=16, initial_delay=8, backoff_factor=1, exceptions=(Exception,))
+def gemini_chat_completion_with_retry(engine, messages, **kwargs):
+    """A wrapper function to call Gemini API with retry.
+    Args:
+        engine: The model to use (e.g., 'gemini-2.5-flash')
+        messages: [{'role': 'user'/'assistant', 'content': '...'}, ...]
+        **kwargs: Ignored (temperature, max_tokens not used per user request)
+    """
+    client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
+
+    # Convert messages to Gemini format
+    contents = []
+    for msg in messages:
+        role = 'user' if msg['role'] == 'user' else 'model'
+        contents.append({"role": role, "parts": [{"text": msg['content']}]})
+
+    # Call Gemini API without temperature or max_tokens
+    response = client.models.generate_content(
+        model=engine,
+        contents=contents
+    )
+
+    # Track token usage (Gemini provides usage metadata)
+    if hasattr(response, 'usage_metadata'):
+        api_usage_tracker.increment_token_usage(
+            model=engine,
+            prompt_tokens=response.usage_metadata.prompt_token_count,
+            completion_tokens=response.usage_metadata.candidates_token_count
+        )
+
     return response
 
 

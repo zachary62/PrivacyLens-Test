@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 sys.path.append('../helper')
 # from utils import VLLM  # Removed - local model dependencies not needed
-from utils import claude_chat_completion_with_retry, openai_chat_completion_with_retry
+from utils import claude_chat_completion_with_retry, openai_chat_completion_with_retry, gemini_chat_completion_with_retry
 
 
 def prepare_prompt_to_identify_sensitive_information(data_type, data_subject, trajectory):
@@ -210,7 +210,7 @@ def prepare_args():
                         help='Path that saves the helpfulness scores. If provided, can compute the adjusted leakage '
                              'rate when "step" is "judge_leakage".')
     parser.add_argument('--model', type=str, default='claude-sonnet-4-5',
-                        help='The model to use for evaluation. Supports GPT models (e.g., gpt-4-1106-preview, gpt-3.5-turbo-1106) and Claude models (e.g., claude-3-sonnet-20240229, claude-3-haiku-20240307, claude-sonnet-4-5).')
+                        help='The model to use for evaluation. Supports GPT models (e.g., gpt-4-1106-preview), Claude models (e.g., claude-sonnet-4-5), and Gemini models (e.g., gemini-2.5-flash).')
     parser.add_argument('--start-index', type=int, default=0,
                         help='Start index of the cases to evaluate.')
     parser.add_argument('--num', type=int, default=-1,
@@ -299,7 +299,16 @@ def main():
                 max_retries = 3
                 for attempt in range(max_retries):
                     try:
-                        if 'claude' in args.model:
+                        if 'gemini' in args.model:
+                            response = gemini_chat_completion_with_retry(
+                                engine=args.model,
+                                messages=[{'role': 'user', 'content': input_text}]
+                            )
+                            if hasattr(response, 'text') and response.text:
+                                result_text = response.text
+                            else:
+                                raise ValueError("Empty response from Gemini API")
+                        elif 'claude' in args.model:
                             response = claude_chat_completion_with_retry(
                                 engine=args.model,
                                 messages=[{'role': 'user', 'content': input_text}],

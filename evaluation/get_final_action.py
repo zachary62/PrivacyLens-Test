@@ -22,7 +22,7 @@ from toolemu.prompts.agent import *
 from toolemu.tools import get_toolkits_by_names
 
 sys.path.append('../helper')
-from utils import openai_chat_completion_with_retry, print_api_usage, claude_chat_completion_with_retry
+from utils import openai_chat_completion_with_retry, print_api_usage, claude_chat_completion_with_retry, gemini_chat_completion_with_retry
 # from utils import VLLM  # Removed - local model dependencies not needed
 
 
@@ -39,10 +39,10 @@ def prepare_args():
     parser.add_argument('--specific-case-name', type=str, default=None,
                         help='If not None, only evaluate the case with the given name.')
     parser.add_argument('--prompt-type', type=str,
-                        choices=['naive', 'privacy_enhanced', 'privacy_strict'],
-                        help='The type of the prompt to use for the agent. Options: naive (no privacy guidance), privacy_enhanced (balanced), privacy_strict (maximum privacy protection)')
+                        choices=['naive', 'privacy_enhanced', 'privacy_prompt_by_zach'],
+                        help='The type of the prompt to use for the agent. Options: naive (original paper baseline), privacy_enhanced (original paper), privacy_prompt_by_zach (enhanced by Zach with explicit privacy requirements)')
     parser.add_argument('--model', type=str, required=True,
-                        help='The model to use for the agent. Supports GPT models (e.g., gpt-4-1106-preview, gpt-3.5-turbo-1106) and Claude models (e.g., claude-3-sonnet-20240229, claude-3-haiku-20240307, claude-sonnet-4-5).')
+                        help='The model to use for the agent. Supports GPT models (e.g., gpt-4-1106-preview), Claude models (e.g., claude-sonnet-4-5), and Gemini models (e.g., gemini-2.5-flash).')
     # GPU arguments removed - no longer needed for API-based models
     # parser.add_argument('--gpu-num', type=int, default=1, help='Number of GPUs to use for VLLM.')
     # parser.add_argument('--hf-cache-dir', type=str, help='The cache directory for the Hugging Face model.')
@@ -79,8 +79,8 @@ def prepare_agent_prompt(
     elif prompt_type == 'privacy_enhanced':
         system_info = AGENT_PRIVACY_ENHANCED_SYSTEM_INFO
         prompt_instruction = AGENT_PRIVACY_ENHANCED_PROMPT
-    elif prompt_type == 'privacy_strict':
-        system_info = AGENT_PRIVACY_STRICT_SYSTEM_INFO
+    elif prompt_type == 'privacy_prompt_by_zach':
+        system_info = AGENT_PRIVACY_PROMPT_BY_ZACH_SYSTEM_INFO
         prompt_instruction = AGENT_PRIVACY_ENHANCED_PROMPT  # Use same instruction format, just different system prompt
     else:
         raise ValueError(f'[Error] Unknown prompt type: {prompt_type}.')
@@ -205,7 +205,11 @@ def main():
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                if 'gpt' in args.model:
+                if 'gemini' in args.model:
+                    response = gemini_chat_completion_with_retry(
+                        engine=args.model, messages=[{'role': 'user', 'content': agent_prompt}])
+                    final_action = response.text.strip()
+                elif 'gpt' in args.model:
                     response = openai_chat_completion_with_retry(
                         engine=args.model, messages=[{'role': 'user', 'content': agent_prompt}],
                         max_tokens=400, temperature=0.0)

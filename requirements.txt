@@ -15,6 +15,5 @@ scikit-learn
 statsmodels
 matplotlib
 seaborn
-anthropic==0.3.6
 pydantic==1.10.13
 git+https://github.com/dhh1995/PromptCoder.git#egg=procoder
