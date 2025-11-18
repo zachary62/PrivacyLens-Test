@@ -4,6 +4,7 @@ import os
 import random
 import re
 import sys
+import time
 from argparse import ArgumentParser
 
 import numpy as np
@@ -42,17 +43,9 @@ def prepare_args():
                         default=['seed', 'vignette', 'trajectory', 'trajectory_enhancing'],
                         help='The probing level to evaluate.')
     parser.add_argument('--model', type=str, required=True,
-                        choices=['gpt-4-1106',
-                                 'gpt-35-turbo-1106',
-                                 'claude-3-haiku-20240307',
-                                 'claude-3-sonnet-20240229',
-                                 'mistralai/Mistral-7B-Instruct-v0.2',
-                                 'HuggingFaceH4/zephyr-7b-beta',
-                                 'mistralai/Mixtral-8x7B-Instruct-v0.1',
-                                 'meta-llama/Meta-Llama-3-8B-Instruct',
-                                 'meta-llama/Meta-Llama-3-70B-Instruct'])
-    parser.add_argument('--hf-cache-dir', type=str,
-                        help='The cache directory for the Hugging Face model.')
+                        help='The model to use for evaluation. Supports GPT models (e.g., gpt-4-1106-preview, gpt-3.5-turbo-1106) and Claude models (e.g., claude-3-sonnet-20240229, claude-3-haiku-20240307, claude-sonnet-4-5).')
+    # GPU arguments removed - no longer needed for API-based models
+    # parser.add_argument('--hf-cache-dir', type=str, help='The cache directory for the Hugging Face model.')
 
     return parser.parse_args()
 
@@ -176,6 +169,34 @@ def find_isolated_capital_b(text):
     return len(re.findall(pattern, text)) > 0
 
 
+def safe_get_claude_response(engine, messages, max_tokens, temperature=0.0, max_retries=3):
+    """Safely get Claude response with retry logic for empty responses."""
+    for attempt in range(max_retries):
+        try:
+            response = claude_chat_completion_with_retry(
+                engine=engine, messages=messages, max_tokens=max_tokens, temperature=temperature
+            )
+
+            # Check for refusal (safety filter)
+            stop_reason = response.stop_reason if hasattr(response, 'stop_reason') else 'unknown'
+            if stop_reason == 'refusal':
+                print(f"\n[SKIP] Claude refused to respond (safety filter)")
+                return "[REFUSAL]"  # Mark as refusal and skip retries
+
+            if response.content and len(response.content) > 0:
+                return response.content[0].text.strip()
+            else:
+                raise ValueError(f"Empty response from Claude API. Stop reason: {stop_reason}")
+        except (IndexError, ValueError) as e:
+            print(f"Attempt {attempt + 1}/{max_retries} failed: {e}")
+            if attempt == max_retries - 1:
+                # On final attempt, raise exception to fail the script
+                raise RuntimeError(f"Failed to get valid Claude response after {max_retries} attempts. Last error: {e}")
+            time.sleep(2)
+    # This line should never be reached, but just in case
+    raise RuntimeError(f"Failed to get valid Claude response after {max_retries} attempts")
+
+
 @print_api_usage
 def main():
     seed = 0
@@ -296,30 +317,25 @@ def main():
                 result['trajectory_privacy_enhanced_prompt_answer'].append(trajectory_privacy_enhanced_prompt_answer)
         elif 'claude' in args.model:
             if 'seed' in args.level:
-                seed_response = claude_chat_completion_with_retry(
+                seed_answer = safe_get_claude_response(
                     engine=args.model, messages=[{'role': 'user', 'content': seed_probing_prompt}],
                     max_tokens=5, temperature=0.0)
-                seed_answer = seed_response.content[0].text.strip()
                 result['seed_answer'].append(seed_answer)
             if 'vignette' in args.level:
-                vignette_response = claude_chat_completion_with_retry(
+                vignette_answer = safe_get_claude_response(
                     engine=args.model, messages=[{'role': 'user', 'content': vignette_probing_prompt}],
                     max_tokens=5, temperature=0.0)
-                vignette_answer = vignette_response.content[0].text.strip()
                 result['vignette_answer'].append(vignette_answer)
             if 'trajectory' in args.level:
-                trajectory_naive_prompt_response = claude_chat_completion_with_retry(
+                trajectory_naive_prompt_answer = safe_get_claude_response(
                     engine=args.model, messages=[{'role': 'user', 'content': trajectory_probing_naive_prompt}],
                     max_tokens=5, temperature=0.0)
-                trajectory_naive_prompt_answer = trajectory_naive_prompt_response.content[0].text.strip()
                 result['trajectory_naive_prompt_answer'].append(trajectory_naive_prompt_answer)
             if 'trajectory_enhancing' in args.level:
-                trajectory_privacy_enhanced_prompt_response = claude_chat_completion_with_retry(
+                trajectory_privacy_enhanced_prompt_answer = safe_get_claude_response(
                     engine=args.model,
                     messages=[{'role': 'user', 'content': trajectory_probing_privacy_enhanced_prompt}],
                     max_tokens=5, temperature=0.0)
-                trajectory_privacy_enhanced_prompt_answer = trajectory_privacy_enhanced_prompt_response.content[
-                    0].text.strip()
                 result['trajectory_privacy_enhanced_prompt_answer'].append(trajectory_privacy_enhanced_prompt_answer)
         # Local model support removed - use API-based models (GPT or Claude) instead
         # elif 'mistral' in args.model or 'llama' in args.model or 'zephyr' in args.model:

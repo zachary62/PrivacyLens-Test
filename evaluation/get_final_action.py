@@ -3,6 +3,7 @@ import json
 import os
 import random
 import sys
+import time
 
 import numpy as np
 import openai
@@ -38,14 +39,13 @@ def prepare_args():
     parser.add_argument('--specific-case-name', type=str, default=None,
                         help='If not None, only evaluate the case with the given name.')
     parser.add_argument('--prompt-type', type=str,
-                        choices=['naive', 'privacy_enhanced', 'conservative', 'reckless'],
-                        help='The type of the prompt to use for the agent.')
+                        choices=['naive', 'privacy_enhanced', 'privacy_strict'],
+                        help='The type of the prompt to use for the agent. Options: naive (no privacy guidance), privacy_enhanced (balanced), privacy_strict (maximum privacy protection)')
     parser.add_argument('--model', type=str, required=True,
-                        help='The model to use for the agent.')
-    parser.add_argument('--gpu-num', type=int, default=1,
-                        help='Number of GPUs to use for VLLM.')
-    parser.add_argument('--hf-cache-dir', type=str,
-                        help='The cache directory for the Hugging Face model.')
+                        help='The model to use for the agent. Supports GPT models (e.g., gpt-4-1106-preview, gpt-3.5-turbo-1106) and Claude models (e.g., claude-3-sonnet-20240229, claude-3-haiku-20240307, claude-sonnet-4-5).')
+    # GPU arguments removed - no longer needed for API-based models
+    # parser.add_argument('--gpu-num', type=int, default=1, help='Number of GPUs to use for VLLM.')
+    # parser.add_argument('--hf-cache-dir', type=str, help='The cache directory for the Hugging Face model.')
 
     return parser.parse_args()
 
@@ -79,8 +79,11 @@ def prepare_agent_prompt(
     elif prompt_type == 'privacy_enhanced':
         system_info = AGENT_PRIVACY_ENHANCED_SYSTEM_INFO
         prompt_instruction = AGENT_PRIVACY_ENHANCED_PROMPT
+    elif prompt_type == 'privacy_strict':
+        system_info = AGENT_PRIVACY_STRICT_SYSTEM_INFO
+        prompt_instruction = AGENT_PRIVACY_ENHANCED_PROMPT  # Use same instruction format, just different system prompt
     else:
-        raise ValueError('[Error] Unknown prompt type: {prompt_type}.')
+        raise ValueError(f'[Error] Unknown prompt type: {prompt_type}.')
 
     system_info, prompt_instruction = format_multiple_prompts(
         [system_info, prompt_instruction], inputs, include_brackets=[False, True]
@@ -172,6 +175,15 @@ def main():
         'final_action': [],
     }
 
+    # Create output directory if it doesn't exist
+    os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
+
+    # Save progress every 10 items
+    save_interval = 10
+
+    # Track refusals
+    refusal_count = 0
+
     for i in tqdm(range(args.start_index, end_index)):
         result['name'].append(data[i]['name'])
         agent_prompt = prepare_agent_prompt(
@@ -184,43 +196,102 @@ def main():
             final_action=data[i]['trajectory']['final_action']
         )
 
-        if 'gpt' in args.model:
-            final_action = openai_chat_completion_with_retry(
-                engine=args.model, messages=[{'role': 'user', 'content': agent_prompt}],
-                max_tokens=400, temperature=0.0)
-            final_action = final_action.choices[0].message['content'].strip()
-        elif 'claude' in args.model:
-            final_action = claude_chat_completion_with_retry(
-                engine=args.model, messages=[{'role': 'user', 'content': agent_prompt}],
-                max_tokens=400, temperature=0.0)
-            final_action = final_action.content[0].text.strip()
-        # Local model support removed - use API-based models (GPT or Claude) instead
-        # elif 'mistral' in args.model or 'llama' in args.model or 'zephyr' in args.model or 'vicuna' in args.model:
-        #     inputs = [agent_prompt]
-        #     inputs_in_chat_template = []
-        #     if 'vicuna' in args.model:
-        #         for input_text in inputs:
-        #             inputs_in_chat_template.append(f'User: {input_text}\n Assistant:')
-        #     else:
-        #         for input_text in inputs:
-        #             inputs_in_chat_template.append(
-        #                 tokenizer.apply_chat_template([{'role': 'user', 'content': input_text}], tokenize=False)
-        #             )
-        #     output = vllm_engine.generate(inputs_in_chat_template).generations
-        #     final_action = output[0][0].text.strip()
-        else:
-            raise NotImplementedError
+        # Debug: Print prompt info
+        prompt_length = len(agent_prompt)
+        print(f"[INFO] Case {i} (name: {data[i]['name']}) - Prompt length: {prompt_length} chars")
+
+        # Retry logic for API calls (max 3 attempts)
+        final_action = None
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                if 'gpt' in args.model:
+                    response = openai_chat_completion_with_retry(
+                        engine=args.model, messages=[{'role': 'user', 'content': agent_prompt}],
+                        max_tokens=400, temperature=0.0)
+                    final_action = response.choices[0].message['content'].strip()
+                elif 'claude' in args.model:
+                    response = claude_chat_completion_with_retry(
+                        engine=args.model, messages=[{'role': 'user', 'content': agent_prompt}],
+                        max_tokens=400, temperature=0.0)
+
+                    # Check for refusal first (safety filter)
+                    stop_reason = response.stop_reason if hasattr(response, 'stop_reason') else 'unknown'
+
+                    if stop_reason == 'refusal':
+                        print(f"\n[SKIP] Case {i} (name: {data[i]['name']}) - Claude refused to respond (safety filter)")
+                        final_action = "[REFUSAL]"  # Mark as refusal
+                        refusal_count += 1
+                        break  # Skip retries, continue to next case
+
+                    # Debug: Print raw response details for non-refusal cases
+                    if not (response.content and len(response.content) > 0):
+                        print(f"\n[DEBUG] Case {i} - Raw Claude response:")
+                        print(f"  Response type: {type(response)}")
+                        print(f"  Response ID: {response.id if hasattr(response, 'id') else 'N/A'}")
+                        print(f"  Stop reason: {stop_reason}")
+                        print(f"  Content length: {len(response.content) if hasattr(response, 'content') else 'N/A'}")
+                        if hasattr(response, 'content') and response.content:
+                            print(f"  Content blocks: {len(response.content)}")
+                            for idx, block in enumerate(response.content):
+                                print(f"    Block {idx}: type={type(block)}, text_len={len(block.text) if hasattr(block, 'text') else 'N/A'}")
+
+                    if response.content and len(response.content) > 0:
+                        final_action = response.content[0].text.strip()
+                    else:
+                        raise ValueError(f"Empty response from Claude API. Stop reason: {stop_reason}")
+                else:
+                    raise NotImplementedError(f"Model {args.model} not supported")
+
+                # If we got a valid response, break out of retry loop
+                if final_action:
+                    break
+
+            except Exception as e:
+                print(f"\n[ERROR] Attempt {attempt + 1}/{max_retries} failed for case {i} (name: {data[i]['name']})")
+                print(f"  Error type: {type(e).__name__}")
+                print(f"  Error message: {e}")
+                import traceback
+                print(f"  Traceback:\n{traceback.format_exc()}")
+
+                if attempt == max_retries - 1:
+                    # On final attempt, raise exception to fail the script
+                    raise RuntimeError(f"Failed to get valid response for case {i} (name: {data[i]['name']}) after {max_retries} attempts. Last error: {e}")
+                else:
+                    # Wait a bit before retrying
+                    print(f"  Waiting 2 seconds before retry...\n")
+                    time.sleep(2)
+                    continue
 
         # Post-process the model output.
         result['final_action'].append(post_process(final_action))
 
-    os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
+        # Save progress periodically
+        if (i + 1) % save_interval == 0:
+            try:
+                pd.DataFrame(result).to_csv(args.output_path, index=False)
+                print(f"\nProgress saved: {i + 1 - args.start_index} items completed")
+            except Exception as e:
+                print(f"\nWarning: Failed to save progress: {e}")
+
+    # Final save
     try:
         pd.DataFrame(result).to_csv(args.output_path, index=False)
     except Exception as e:
         print(f'Error: {e}')
         with open(args.output_path.replace('.csv', 'json'), 'w') as f:
             json.dump(result, f)
+
+    # Print summary
+    total_processed = end_index - args.start_index
+    successful = total_processed - refusal_count
+    print(f"\n{'='*60}")
+    print(f"SUMMARY:")
+    print(f"  Total processed: {total_processed}")
+    print(f"  Successful: {successful} ({100*successful/total_processed:.1f}%)")
+    print(f"  Refusals (safety filter): {refusal_count} ({100*refusal_count/total_processed:.1f}%)")
+    print(f"  Results saved to: {args.output_path}")
+    print(f"{'='*60}")
 
 
 if __name__ == '__main__':
